@@ -43,7 +43,7 @@ annotate FeliosService.ProductionOrders with @(UI: {
   {
     $Type : 'UI.DataFieldForAction',
     Action: 'FeliosService.changeReceiver',
-    Label : 'Empfänger ändern' // So heißt der Button im Browser
+    Label : 'Empfänger ändern' // So heißt der Button im Browser F
   }
 ]});
 
