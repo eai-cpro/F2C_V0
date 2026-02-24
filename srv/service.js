@@ -6,7 +6,6 @@ module.exports = cds.service.impl(async function () {
 
   this.on('READ', 'ProductionOrders', async (req) => s4.run(req.query));
 
-  // ✅ DEINE BATCH-ACTION
   this.on('changeReceiverBatch', async (req) => {
     const ids = req.data.ManufacturingOrders;
     const neuerName = req.data.newName;
@@ -14,12 +13,12 @@ module.exports = cds.service.impl(async function () {
     if (!Array.isArray(ids) || ids.length === 0) return req.error(400, "Keine IDs übergeben.");
     if (!neuerName) return req.error(400, "newName fehlt.");
 
-    console.log(`\n🚀 STARTE ECHTEN BATCH: ${ids.length} Aufträge -> "${neuerName}"`);
-    console.time("⏱️ Batch Gesamtzeit");
+    console.log(`\n📦 STARTE VORBEREITUNG: ${ids.length} Aufträge...`);
+    console.time("⏱️ Gesamtzeit");
 
-    let successCount = 0;
+    const updateAufgaben = []; // Hier sammeln wir die laufenden Raketen (Promises)
 
-    // Deine sichere Schleife für S/4HANA
+    // 1. Wir holen brav für jeden Auftrag das ETag ab
     for (const id of ids) {
       try {
         const query = SELECT.one.from('A_ProductionOrder_2').where({ ManufacturingOrder: id });
@@ -28,23 +27,46 @@ module.exports = cds.service.impl(async function () {
         if (!data) continue;
 
         let etag = "*";
-        if (data.LastChangeDateTime) etag = `W/"'${data.LastChangeDateTime}'"`;
+        if (data.LastChangeDateTime) {
+            etag = `W/"'${data.LastChangeDateTime}'"`;
+        } else if (data.__metadata && data.__metadata.etag) {
+            etag = data.__metadata.etag;
+        }
 
-        await s4.send({
+        console.log(`✅ ETag für ${id} geholt.`);
+
+        // 2. WICHTIG: Kein "await" hier! Wir starten den Sendevorgang, 
+        // warten aber nicht auf die Antwort, sondern packen ihn in unsere Liste.
+        const updatePromise = s4.send({
           method: 'PATCH',
           path: `A_ProductionOrder_2('${id}')`,
           data: { GoodsRecipientName: neuerName },
           headers: { "If-Match": etag }
         });
+        
+        updateAufgaben.push(updatePromise);
 
-        successCount++;
-        console.log(`✅ ${id} erledigt`);
       } catch (e) {
-        console.error(`❌ Fehler bei ${id}:`, e.message);
+        console.error(`❌ Fehler beim ETag für ${id}:`, e.message);
       }
     }
 
-    console.timeEnd("⏱️ Batch Gesamtzeit");
-    return `Erfolg: ${successCount} von ${ids.length} aktualisiert!`;
+    // 3. Wenn wir alle ETags haben, lassen wir es krachen!
+    if (updateAufgaben.length > 0) {
+        try {
+            console.log(`\n🚀 FEUERE PARALLEL-UPDATES AN S/4HANA AB (${updateAufgaben.length} Stück gleichzeitig)!`);
+            
+            // Promise.all wartet, bis ALLE Updates in SAP fertig gebucht sind.
+            await Promise.all(updateAufgaben); 
+            
+            console.log(`🎉 S/4HANA Massen-Update erfolgreich!\n`);
+        } catch (err) {
+            console.error(`❌ Fehler beim S/4HANA Update:`, err.message);
+            return req.error(500, "Fehler beim Update in S/4HANA.");
+        }
+    }
+
+    console.timeEnd("⏱️ Gesamtzeit");
+    return `Erfolg: ${updateAufgaben.length} Aufträge parallel aktualisiert!`;
   });
 });

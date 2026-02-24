@@ -13,7 +13,7 @@ service FeliosService {
 
   // ✅ Echte Massen-Action (Freistehend, erwartet ein Array von IDs)
   action changeReceiverBatch(
-    ManufacturingOrders : array of String,
+    ManufacturingOrders : array of String, //
     newName             : String
   ) returns String; 
 }
